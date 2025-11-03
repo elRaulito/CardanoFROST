@@ -1,0 +1,24 @@
+[package]
+name = "frost_pallas_wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+blake2b_simd = "1.0"
+bech32 = "0.11"
+anyhow = "1"
+getrandom = { version = "0.2", features = ["js"] }
+rand = "0.8"
+frost-ed25519 = "2.2.0"
+pallas-codec = "0.33"
+pallas-crypto = "0.33"
+pallas-primitives = "0.33"
+bincode = "1"
+base64 = "0.21"
