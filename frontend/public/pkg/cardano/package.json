@@ -1,0 +1,15 @@
+{
+  "name": "frost_pallas_wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "frost_pallas_wasm_bg.wasm",
+    "frost_pallas_wasm.js",
+    "frost_pallas_wasm.d.ts"
+  ],
+  "main": "frost_pallas_wasm.js",
+  "types": "frost_pallas_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
