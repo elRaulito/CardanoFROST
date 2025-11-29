@@ -22,3 +22,6 @@ pallas-crypto = "0.33"
 pallas-primitives = "0.33"
 bincode = "1"
 base64 = "0.21"
+frost-secp256k1-tr = "2.2.0"   # or the latest version from crates.io
+bitcoin = { version = "0.32.7"}
+miniscript = "11.0"

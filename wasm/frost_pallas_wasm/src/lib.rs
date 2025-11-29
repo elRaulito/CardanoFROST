@@ -17,6 +17,8 @@ use base64::{engine::general_purpose, Engine as _};
 use bincode;
 
 
+
+
 fn parse_share_file_flexible(json: &str) -> Result<ShareFile, JsValue> {
     // 1) Try full ShareFile first
     if let Ok(sf) = serde_json::from_str::<ShareFile>(json) {
@@ -648,4 +650,364 @@ pub fn txhash_from_cbor_bytes(tx_bytes: &[u8]) -> Result<JsValue, JsValue> {
 
 
 
+
+use wasm_bindgen::prelude::*;
+
+use frost_secp256k1_tr as frost_btc;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
+use frost_secp256k1_tr::keys::Tweak;
+
+use bitcoin::{
+    psbt::Psbt,
+    Address, Network,
+    taproot,
+    key::TweakedPublicKey,
+    sighash::{SighashCache, Prevouts, TapSighashType},
+    secp256k1::{Secp256k1, XOnlyPublicKey, Scalar},
+    hashes::Hash,
+    Witness,
+};
+
+use base64::{Engine};
+
+
+
+
+// ------------------ STATE ------------------
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BtcPersistedState {
+    pub max_signers: u16,
+    pub min_signers: u16,
+    pub shares: Vec<(frost_btc::Identifier, frost_btc::keys::SecretShare)>,
+    pub pubkey_package: frost_btc::keys::PublicKeyPackage,
+}
+
+// ------------------ DEALER ------------------
+
+#[wasm_bindgen]
+pub fn btc_frost_generate_state(max: u16, min: u16) -> Result<JsValue, JsValue> {
+    let (shares, pubkey_package) = frost_btc::keys::generate_with_dealer(
+        max,
+        min,
+        frost_btc::keys::IdentifierList::Default,
+        &mut OsRng,
+    ).map_err(js_err)?;
+
+    let shares_vec: Vec<(frost_btc::Identifier, frost_btc::keys::SecretShare)> =
+        shares.into_iter().map(|(id, s)| (id, s)).collect();
+
+    let state = BtcPersistedState {
+        max_signers: max,
+        min_signers: min,
+        shares: shares_vec,
+        pubkey_package,
+    };
+
+    let json = serde_json::to_string(&state).map_err(js_err)?;
+    Ok(JsValue::from_str(&json))
+}
+
+// ------------------ PUBKEY / ADDRESS ------------------
+
+#[wasm_bindgen]
+pub fn btc_xonly_pubkey_from_pubkey_package(pubkey_pkg_json: &str) -> Result<Vec<u8>, JsValue> {
+    let pkg: frost_btc::keys::PublicKeyPackage =
+        serde_json::from_str(pubkey_pkg_json).map_err(js_err)?;
+
+    let compressed = pkg.verifying_key().serialize().map_err(js_err)?;
+    Ok(compressed[1..33].to_vec())
+}
+
+#[wasm_bindgen]
+pub fn btc_p2tr_address_from_pubkey_package(pubkey_pkg_json: &str, is_mainnet: bool) -> Result<String, JsValue> {
+    let pkg: frost_btc::keys::PublicKeyPackage =
+        serde_json::from_str(pubkey_pkg_json).map_err(js_err)?;
+
+    let compressed = pkg.verifying_key().serialize().map_err(js_err)?;
+    let xonly = XOnlyPublicKey::from_slice(&compressed[1..33]).map_err(js_err)?;
+    let secp = Secp256k1::new();
+
+    let tweak_hash = bitcoin::TapTweakHash::from_key_and_tweak(xonly, None);
+    let tweak_bytes: [u8; 32] = *tweak_hash.as_byte_array();
+    let tweak = Scalar::from_be_bytes(tweak_bytes).map_err(js_err)?;
+
+    let (tweaked, _) = xonly.add_tweak(&secp, &tweak).map_err(js_err)?;
+    let tweaked_pk = TweakedPublicKey::dangerous_assume_tweaked(tweaked);
+
+    let net = if is_mainnet { Network::Bitcoin } else { Network::Testnet };
+    Ok(Address::p2tr_tweaked(tweaked_pk, net).to_string())
+}
+
+// ------------------ SIGNING PACKAGE ------------------
+
+#[derive(Serialize, Deserialize)]
+pub struct BtcSigningPackageOut {
+    pub signing_package_b64: String,
+    pub sighash_hex: String,
+    pub address: String,
+}
+
+
+#[wasm_bindgen]
+pub fn btc_build_signing_package_from_psbt(
+    psbt_hex: &str,
+    input_index: u32,
+    pubkey_pkg_json: &str,
+    commitments_json: &str   // ✅ già corretto
+) -> Result<JsValue, JsValue> {
+
+    use frost_secp256k1_tr as frost;
+    use frost::round1::SigningCommitments;
+
+    // --- parse PSBT ---
+    let psbt_bytes = hex::decode(psbt_hex).map_err(js_err)?;
+    let mut slice: &[u8] = &psbt_bytes;
+    let psbt = Psbt::deserialize(&mut slice).map_err(js_err)?;
+
+    let prevouts_vec: Vec<&bitcoin::TxOut> = psbt.inputs
+        .iter()
+        .map(|i| i.witness_utxo.as_ref().expect("missing witness_utxo"))
+        .collect();
+
+    let prevouts = Prevouts::All(&prevouts_vec);
+    let mut cache = SighashCache::new(&psbt.unsigned_tx);
+
+    let sighash = cache.taproot_key_spend_signature_hash(
+        input_index as usize,
+        &prevouts,
+        TapSighashType::Default,
+    ).map_err(js_err)?;
+
+    let msg: [u8; 32] = sighash.to_byte_array();
+
+    // --- PARSE COMMITMENTS (ARRAY) ---
+    let arr: Vec<serde_json::Value> = serde_json::from_str(commitments_json).map_err(js_err)?;
+
+    let mut commitments = BTreeMap::<frost::Identifier, SigningCommitments>::new();
+
+    for v in arr {
+        let id: frost::Identifier = serde_json::from_value(v["identifier"].clone()).map_err(js_err)?;
+        let commits_b64 = v["commitments_b64"].as_str().ok_or("missing commitments_b64")?;
+
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(commits_b64)
+            .map_err(js_err)?;
+
+        let signing_commitments: SigningCommitments =
+            bincode::deserialize(&decoded).map_err(js_err)?;
+
+        commitments.insert(id, signing_commitments);
+    }
+
+    // --- BUILD SIGNING PACKAGE ---
+    let signing_pkg = frost::SigningPackage::new(commitments, &msg);
+
+    let bin = bincode::serialize(&signing_pkg).map_err(js_err)?;
+    let signing_package_b64 = base64::engine::general_purpose::STANDARD.encode(bin);
+
+    // --- ADDRESS DERIVATION ---
+    let pkg: frost::keys::PublicKeyPackage =
+        serde_json::from_str(pubkey_pkg_json).map_err(js_err)?;
+
+    let compressed = pkg.verifying_key().serialize().map_err(js_err)?;
+    let xonly = XOnlyPublicKey::from_slice(&compressed[1..33]).map_err(js_err)?;
+    let secp = Secp256k1::new();
+
+    let tweak_hash = bitcoin::TapTweakHash::from_key_and_tweak(xonly, None);
+    let tweak_bytes: [u8; 32] = *tweak_hash.as_byte_array();
+    let tweak = Scalar::from_be_bytes(tweak_bytes).map_err(js_err)?;
+
+    let (tweaked, _) = xonly.add_tweak(&secp, &tweak).map_err(js_err)?;
+    let tweaked_pk = TweakedPublicKey::dangerous_assume_tweaked(tweaked);
+    let addr = Address::p2tr_tweaked(tweaked_pk, Network::Bitcoin).to_string();
+
+    // --- RETURN ---
+    let out = serde_json::json!({
+        "signing_package_b64": signing_package_b64,
+        "sighash_hex": hex::encode(msg),
+        "address": addr
+    });
+
+    Ok(JsValue::from_str(&out.to_string()))
+}
+
+
+// ------------------ ROUND 1 ------------------
+
+#[wasm_bindgen]
+pub fn btc_round1_make_commitments(share_json: &str) -> Result<JsValue, JsValue> {
+    let ss: frost_btc::keys::SecretShare = serde_json::from_str(share_json).map_err(js_err)?;
+    let kp = frost_btc::keys::KeyPackage::try_from(ss.clone()).map_err(js_err)?;
+
+    let (nonces, commitments) = frost_btc::round1::commit(kp.signing_share(), &mut OsRng);
+
+    let out = serde_json::json!({
+        "identifier": kp.identifier(),
+        "nonces_b64": general_purpose::STANDARD.encode(bincode::serialize(&nonces).map_err(js_err)?),
+        "commitments_b64": general_purpose::STANDARD.encode(bincode::serialize(&commitments).map_err(js_err)?)
+    });
+
+    Ok(JsValue::from_str(&out.to_string()))
+}
+
+// ------------------ ROUND 2 ------------------
+
+#[wasm_bindgen]
+pub fn btc_round2_sign_share(
+    secret_share_json: &str,
+    nonces_b64: &str,
+    signing_package_b64: &str,
+) -> Result<JsValue, JsValue> {
+
+    // --- deserialize SecretShare ---
+    let secret_share: frost_btc::keys::SecretShare =
+        serde_json::from_str(secret_share_json).map_err(js_err)?;
+
+    let key_package =
+        frost_btc::keys::KeyPackage::try_from(secret_share)
+        .map_err(js_err)?;
+
+    // ✅ TWEAK IL KEY PACKAGE (COME NEL TUO MAIN)
+    let tweaked_kp = key_package.clone().tweak::<&[u8]>(None);
+
+    // --- decode nonces ---
+    let nonces_bytes = base64::engine::general_purpose::STANDARD
+        .decode(nonces_b64)
+        .map_err(js_err)?;
+
+    let nonces: frost_btc::round1::SigningNonces =
+        bincode::deserialize(&nonces_bytes).map_err(js_err)?;
+
+    // --- decode signing package ---
+    let sp_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signing_package_b64)
+        .map_err(js_err)?;
+
+    let signing_package: frost_btc::SigningPackage =
+        bincode::deserialize(&sp_bytes).map_err(js_err)?;
+
+    // ✅ SIGN CON KEY TWEAKATO
+    let sigshare = frost_btc::round2::sign(
+        &signing_package,
+        &nonces,
+        &tweaked_kp
+    ).map_err(js_err)?;
+
+    let sig_bytes = bincode::serialize(&sigshare).map_err(js_err)?;
+    let sig_b64   = base64::engine::general_purpose::STANDARD.encode(sig_bytes);
+
+    let id_hex = hex::encode(tweaked_kp.identifier().serialize());
+
+    let out = serde_json::json!({
+        "identifier": tweaked_kp.identifier(),   // 👈 IDENTIFIER NATIVO
+        "signature_share_b64": sig_b64
+    });
+
+
+    Ok(JsValue::from_str(&out.to_string()))
+}
+
+
+
+// ------------------ AGGREGATE + FINAL TX ------------------
+
+
+#[wasm_bindgen]
+pub fn btc_aggregate_and_finalize_psbt(
+    pubkey_pkg_json: &str,
+    signing_package_b64: &str,
+    sig_shares_json: &str,
+    psbt_hex: &str,
+    input_index: u32,
+) -> Result<JsValue, JsValue> {
+
+    // -------------------------------------------------
+    // 1) Parse PublicKeyPackage
+    // -------------------------------------------------
+    let pkg: frost_btc::keys::PublicKeyPackage =
+        serde_json::from_str(pubkey_pkg_json).map_err(js_err)?;
+
+    // -------------------------------------------------
+    // 2) Decode SigningPackage
+    // -------------------------------------------------
+    let sp_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signing_package_b64)
+        .map_err(js_err)?;
+
+    let signing_package: frost_btc::SigningPackage =
+        bincode::deserialize(&sp_bytes).map_err(js_err)?;
+
+    // -------------------------------------------------
+    // 3) Decode Signature Shares
+    // -------------------------------------------------
+    let values: Vec<serde_json::Value> =
+        serde_json::from_str(sig_shares_json).map_err(js_err)?;
+
+    let mut sig_map = BTreeMap::new();
+
+    for v in values {
+        let id: frost_btc::Identifier =
+            serde_json::from_value(v["identifier"].clone()).map_err(js_err)?;
+
+        let sig_b64 = v["signature_share_b64"]
+            .as_str()
+            .ok_or(js_err("missing signature_share_b64"))?;
+
+        let sig_bytes =
+            base64::engine::general_purpose::STANDARD.decode(sig_b64).map_err(js_err)?;
+
+        let sig: frost_btc::round2::SignatureShare =
+            bincode::deserialize(&sig_bytes).map_err(js_err)?;
+
+        sig_map.insert(id, sig);
+    }
+
+    // -------------------------------------------------
+    // 4) Aggregate WITH Taproot tweak (KEY SPEND)
+    // -------------------------------------------------
+    let group_sig = frost_btc::aggregate_with_tweak(
+        &signing_package,
+        &sig_map,
+        &pkg,
+        None   // ✅ NO script tree → key spend
+    ).map_err(js_err)?;
+
+    // -------------------------------------------------
+    // 5) Serialize BIP340 Signature
+    // -------------------------------------------------
+    let sig64 = group_sig.serialize().map_err(js_err)?;
+    let sig64: [u8; 64] =
+        sig64.as_slice().try_into().map_err(|_| js_err("Signature not 64 bytes"))?;
+
+    // -------------------------------------------------
+    // 6) Parse PSBT
+    // -------------------------------------------------
+    let psbt_bytes = hex::decode(psbt_hex).map_err(js_err)?;
+    let mut slice: &[u8] = &psbt_bytes;
+    let mut psbt = Psbt::deserialize(&mut slice).map_err(js_err)?;
+
+    // -------------------------------------------------
+    // 7) Insert Taproot signature
+    // -------------------------------------------------
+    let tap_sig = bitcoin::taproot::Signature::from_slice(&sig64).map_err(js_err)?;
+    let idx = input_index as usize;
+
+    psbt.inputs[idx].tap_key_sig = Some(tap_sig);
+    psbt.inputs[idx].final_script_witness =
+        Some(Witness::from(vec![sig64.to_vec()]));
+
+    // -------------------------------------------------
+    // 8) Final transaction
+    // -------------------------------------------------
+    let final_tx = psbt.extract_tx().map_err(js_err)?;
+    let final_hex = bitcoin::consensus::encode::serialize_hex(&final_tx);
+
+    let out = serde_json::json!({
+        "final_tx_hex": final_hex,
+        "sig_hex": hex::encode(sig64),
+    });
+
+    Ok(JsValue::from_str(&out.to_string()))
+}
 

@@ -1,1 +1,1 @@
-C:\Users\raulr\Downloads\frost-pallas-web-full\wasm\frost_pallas_wasm\target\wasm32-unknown-unknown\release\frost_pallas_wasm.wasm: C:\Users\raulr\Downloads\frost-pallas-web-full\wasm\frost_pallas_wasm\src\lib.rs
+C:\Users\raulr\Documents\GitHub\CardanoFROST\wasm\frost_pallas_wasm\target\wasm32-unknown-unknown\release\frost_pallas_wasm.wasm: C:\Users\raulr\Documents\GitHub\CardanoFROST\wasm\frost_pallas_wasm\src\lib.rs

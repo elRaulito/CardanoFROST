@@ -1,0 +1,10 @@
+C:\Users\raulr\Documents\GitHub\CardanoFROST\wasm\frost_pallas_wasm\target\wasm32-unknown-unknown\release\deps\secp256k1_sys-cbf080d207a9c900.d: C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\lib.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\macros.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\types.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\recovery.rs
+
+C:\Users\raulr\Documents\GitHub\CardanoFROST\wasm\frost_pallas_wasm\target\wasm32-unknown-unknown\release\deps\libsecp256k1_sys-cbf080d207a9c900.rlib: C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\lib.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\macros.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\types.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\recovery.rs
+
+C:\Users\raulr\Documents\GitHub\CardanoFROST\wasm\frost_pallas_wasm\target\wasm32-unknown-unknown\release\deps\libsecp256k1_sys-cbf080d207a9c900.rmeta: C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\lib.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\macros.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\types.rs C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\recovery.rs
+
+C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\lib.rs:
+C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\macros.rs:
+C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\types.rs:
+C:\Users\raulr\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\secp256k1-sys-0.9.2\src\recovery.rs:
